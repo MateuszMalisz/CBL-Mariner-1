@@ -1,28 +1,34 @@
+# Don't depend on bash by default
+%define __requires_exclude ^/(bin|usr/bin).*$
+%define soversion 1.1
 Summary:        Utilities from the general purpose cryptography library with TLS implementation
 Name:           openssl
 Version:        1.1.1g
-Release:        6%{?dist}
+Release:        10%{?dist}
 License:        OpenSSL
-URL:            http://www.openssl.org/
-Group:          System Environment/Security
 Vendor:         Microsoft Corporation
 Distribution:   Mariner
-Source0:        https://www.openssl.org/source/%{name}-%{version}.tar.gz
+Group:          System Environment/Security
+URL:            https://www.openssl.org/
+# We have to remove certain patented algorithms from the openssl source
+# tarball with the hobble-openssl script which is included below.
+# The original openssl upstream tarball cannot be shipped in the .src.rpm.
+Source0:        %{name}-%{version}-hobbled.tar.xz
+Source1:        hobble-openssl
+Source2:        ec_curve.c
+Source3:        ectest.c
+Source4:        ideatest.c
 Patch0:         openssl-1.1.1-no-html.patch
-
 # CVE only applies when Apache HTTP Server version 2.4.37 or less.
 Patch1:         CVE-2019-0190.nopatch
 Patch2:         0001-Replacing-deprecated-functions-with-NULL-or-highest.patch
-Conflicts:      httpd <= 2.4.37
-
+Patch3:         CVE-2020-1971.patch
 BuildRequires:  perl-Test-Warnings
 BuildRequires:  perl-Text-Template
-Requires:       bash
+Requires:       %{name}-libs = %{version}-%{release}
 Requires:       glibc
 Requires:       libgcc
-Requires:       %{name}-libs = %{version}-%{release}
-
-%define soversion 1.1
+Conflicts:      httpd <= 2.4.37
 
 %description
 The OpenSSL toolkit provides support for secure communications between
@@ -31,20 +37,19 @@ libraries which provide various cryptographic algorithms and
 protocols.
 
 %package libs
-Summary: A general purpose cryptography library with TLS implementation
-Group: System Environment/Libraries
+Summary:        A general purpose cryptography library with TLS implementation
+Group:          System Environment/Libraries
 
 %description libs
 OpenSSL is a toolkit for supporting cryptography. The openssl-libs
 package contains the libraries that are used by various applications which
 support cryptographic algorithms and protocols.
-Requires: openssl = %{version}-%{release}
 
 %package devel
-Summary: Development Libraries for openssl
-Group: Development/Libraries
-Requires: openssl = %{version}-%{release}
-Requires: %{name}-libs = %{version}-%{release}
+Summary:        Development Libraries for openssl
+Group:          Development/Libraries
+Requires:       %{name}-libs = %{version}-%{release}
+Requires:       openssl = %{version}-%{release}
 
 %description devel
 OpenSSL is a toolkit for supporting cryptography. The openssl-devel
@@ -52,9 +57,9 @@ package contains include files needed to develop applications which
 support various cryptographic algorithms and protocols.
 
 %package static
-Summary:  Libraries for static linking of applications which will use OpenSSL
-Group: Development/Libraries
-Requires: %{name}-devel = %{version}-%{release}
+Summary:        Libraries for static linking of applications which will use OpenSSL
+Group:          Development/Libraries
+Requires:       %{name}-devel = %{version}-%{release}
 
 %description static
 OpenSSL is a toolkit for supporting cryptography. The openssl-static
@@ -63,10 +68,10 @@ applications which support various cryptographic algorithms and
 protocols.
 
 %package perl
-Summary: Perl scripts provided with OpenSSL
-Group: Applications/Internet
-Requires: perl
-Requires: openssl = %{version}-%{release}
+Summary:        Perl scripts provided with OpenSSL
+Group:          Applications/Internet
+Requires:       openssl = %{version}-%{release}
+Requires:       perl
 
 %description perl
 OpenSSL is a toolkit for supporting cryptography. The openssl-perl
@@ -75,17 +80,27 @@ from other formats to the formats used by the OpenSSL toolkit.
 
 %prep
 %setup -q
+
+# The hobble_openssl is called here redundantly, just to be sure.
+# The tarball has already the sources removed.
+%{SOURCE1} > /dev/null
+
+cp %{SOURCE2} crypto/ec/
+cp %{SOURCE3} test/
+cp %{SOURCE4} test/
+
 %patch0 -p1
 %patch2 -p1
+%patch3 -p1
 
 %build
 # Add -Wa,--noexecstack here so that libcrypto's assembler modules will be
 # marked as not requiring an executable stack.
 # Also add -DPURIFY to make using valgrind with openssl easier as we do not
 # want to depend on the uninitialized memory as a source of entropy anyway.
-RPM_OPT_FLAGS="$RPM_OPT_FLAGS -Wa,--noexecstack -Wa,--generate-missing-build-notes=yes -DPURIFY $RPM_LD_FLAGS"
+NEW_RPM_OPT_FLAGS="%{optflags} -Wa,--noexecstack -Wa,--generate-missing-build-notes=yes -DPURIFY $RPM_LD_FLAGS"
 
-export HASHBANGPERL=/usr/bin/perl
+export HASHBANGPERL=%{_bindir}/perl
 
 # The Configure script already knows to use -fPIC and
 # RPM_OPT_FLAGS, so we can skip specifiying them here.
@@ -115,6 +130,7 @@ export HASHBANGPERL=/usr/bin/perl
     enable-dh \
     enable-dsa \
     no-dtls1 \
+    no-ec2m \
     enable-ec_nistp_64_gcc_128 \
     enable-ecdh \
     enable-ecdsa \
@@ -137,14 +153,13 @@ export HASHBANGPERL=/usr/bin/perl
     no-sm4 \
     no-ssl \
     no-ssl3 \
-    no-tests \
     no-tls1 \
     no-tls1_1 \
     no-weak-ssl-ciphers \
     no-whirlpool \
     no-zlib \
     no-zlib-dynamic \
-    $RPM_OPT_FLAGS \
+    $NEW_RPM_OPT_FLAGS \
     '-DDEVRANDOM="\"/dev/urandom\""'
 
 perl ./configdata.pm -d
@@ -162,21 +177,21 @@ make test
 %install
 [ %{buildroot} != "/" ] && rm -rf %{buildroot}/*
 install -d %{buildroot}{%{_bindir},%{_includedir},%{_libdir},%{_mandir},%{_libdir}/openssl,%{_pkgdocdir}}
-make DESTDIR=%{buildroot} MANDIR=/usr/share/man MANSUFFIX=ssl install
+make DESTDIR=%{buildroot} MANDIR=%{_mandir} MANSUFFIX=ssl install
 rename so.%{soversion} so.%{version} %{buildroot}%{_libdir}/*.so.%{soversion}
 for lib in %{buildroot}%{_libdir}/*.so.%{version} ; do
 	chmod 755 ${lib}
 	ln -s -f `basename ${lib}` %{buildroot}%{_libdir}/`basename ${lib} .%{version}`
 	ln -s -f `basename ${lib}` %{buildroot}%{_libdir}/`basename ${lib} .%{version}`.%{soversion}
 done
-mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/certs
+mkdir -p %{buildroot}%{_sysconfdir}/pki/tls/certs
 
 # Move runable perl scripts to bindir
-mv $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/misc/*.pl $RPM_BUILD_ROOT%{_bindir}
-mv $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/misc/tsget $RPM_BUILD_ROOT%{_bindir}
+mv %{buildroot}%{_sysconfdir}/pki/tls/misc/*.pl %{buildroot}%{_bindir}
+mv %{buildroot}%{_sysconfdir}/pki/tls/misc/tsget %{buildroot}%{_bindir}
 
 # Rename man pages so that they don't conflict with other system man pages.
-pushd $RPM_BUILD_ROOT%{_mandir}
+pushd %{buildroot}%{_mandir}
 ln -s -f config.5 man5/openssl.cnf.5
 for manpage in man*/* ; do
 	if [ -L ${manpage} ]; then
@@ -197,14 +212,14 @@ for conflict in passwd rand ; do
 done
 popd
 
-mkdir -m755 $RPM_BUILD_ROOT%{_sysconfdir}/pki/CA
-mkdir -m700 $RPM_BUILD_ROOT%{_sysconfdir}/pki/CA/private
-mkdir -m755 $RPM_BUILD_ROOT%{_sysconfdir}/pki/CA/certs
-mkdir -m755 $RPM_BUILD_ROOT%{_sysconfdir}/pki/CA/crl
-mkdir -m755 $RPM_BUILD_ROOT%{_sysconfdir}/pki/CA/newcerts
+mkdir -m755 %{buildroot}%{_sysconfdir}/pki/CA
+mkdir -m700 %{buildroot}%{_sysconfdir}/pki/CA/private
+mkdir -m755 %{buildroot}%{_sysconfdir}/pki/CA/certs
+mkdir -m755 %{buildroot}%{_sysconfdir}/pki/CA/crl
+mkdir -m755 %{buildroot}%{_sysconfdir}/pki/CA/newcerts
 
-rm -f $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/openssl.cnf.dist
-rm -f $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/ct_log_list.cnf.dist
+rm -f %{buildroot}%{_sysconfdir}/pki/tls/openssl.cnf.dist
+rm -f %{buildroot}%{_sysconfdir}/pki/tls/ct_log_list.cnf.dist
 
 %files
 %{!?_licensedir:%global license %%doc}
@@ -230,7 +245,7 @@ rm -f $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/ct_log_list.cnf.dist
 
 %files devel
 %doc CHANGES doc/dir-locals.example.el doc/openssl-c-indent.el
-%{_prefix}/include/openssl
+%{_includedir}/openssl
 %{_mandir}/man3*/*
 %{_libdir}/pkgconfig/*.pc
 
@@ -254,9 +269,24 @@ rm -f $RPM_BUILD_ROOT%{_sysconfdir}/pki/tls/ct_log_list.cnf.dist
 %postun libs -p /sbin/ldconfig
 
 %clean
-rm -rf $RPM_BUILD_ROOT
+rm -rf %{buildroot}
+
 
 %changelog
+* Fri Jan 08 2021 Nicolas Ontiveros <niontive@microsoft.com> - 1.1.1g-10
+- Remove source code and support for EC2M.
+- Remove source code for IDEA.
+- Use "hobbled" tarball
+
+* Thu Dec 10 2020 Mateusz Malisz <mamalisz@microsoft.com> - 1.1.1g-9
+- Remove binaries (such as bash) from requires list
+
+* Wed Dec 09 2020 Joe Schmitt <joschmit@microsoft.com> - 1.1.1g-8
+- Patch CVE-2020-1971.
+
+* Tue Nov 10 2020 Johnson George <johgeorg@microsoft.com> 1.1.1g-7
+- Updated the config option to enable package test
+
 * Tue Jul 28 2020 Pawel Winogrodzki <pawelwi@microsoft.com> 1.1.1g-6
 - Replacing removal of functions through the 'no-<prot>-method' option
   with returning a method negotiating the highest supported protocol

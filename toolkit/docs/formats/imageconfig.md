@@ -111,6 +111,12 @@ A sample PackageLists entry pointing to three files containing package lists:
     "packagelists/cloud-init-packages.json"
 ],
 ```
+### RemoveRpmDb
+
+RemoveRpmDb triggers RPM database removal after the packages have been installed.
+Removing the RPM database may break any package managers inside the image.
+
+
 ### KernelOptions
 
 KernelOptions key consists of a map of key-value pairs, where a key is an identifier and a value is a name of the package (kernel) used in a scenario described by the identifier. During the build time, all kernels provided in KernelOptions will be built.
@@ -139,6 +145,59 @@ A sample KernelOptions specifying a default kernel and a specialized kernel for 
     "default": "kernel",
     "hyperv": "kernel-hyperv"
 },
+```
+
+### KernelCommandLine
+
+KernelCommandLine is an optional key which allows additional parameters to be passed to the kernel when it is launched from Grub.
+
+ImaPolicy is a list of Integrity Measurement Architecture (IMA) policies to enable, they may be any combination of `tcb`, `appraise_tcb`, `secure_boot`.
+
+ExtraCommandLine is a string which will be appended to the end of the kernel command line and may contain any additional parameters desired. The `` ` `` character is reserved and may not be used.
+
+A sample KernelCommandLine enabling a basic IMA mode and passing two additional parameters:
+
+``` json
+"KernelCommandLine": {
+    "ImaPolicy": ["tcb"],
+    "ExtraCommandLine": "my_first_param=foo my_second_param=\"bar baz\""
+},
+```
+
+### Users
+
+Users is an array of user information. The User information is a map of key value pairs.
+
+The image generated has users matching the values specified in Users.
+
+The table below are the keys for the users.
+
+|Key                |Type               |Restrictions
+--------------------|:------------------|:------------------------------------------------
+|Name               |string             |Cannot be empty
+|UID                |string             |Must be in range 0-60000
+|PasswordHashed     |bool               |
+|Password           |string             |
+|PasswordExpiresDays|number             |Must be in range 0-99999 or -1 for no expiration
+|SSHPubKeyPaths     |array of strings   |
+|PrimaryGroup       |string             |
+|SecondaryGroups    |array of strings   |
+|StartupCommand     |string             |
+
+An example usage for users "root" and "basicUser" would look like:
+
+``` json
+"Users": [
+    {
+        "Name": "root",
+        "Password": "somePassword"
+    },
+    {
+        "Name": "basicUser",
+        "Password": "someOtherPassword",
+        "UID": 1001
+    }
+]
 ```
 
 # Sample image configuration
@@ -199,6 +258,10 @@ A sample image configuration, producing a VHDX disk image:
             ],
             "KernelOptions": {
                 "default": "kernel"
+            },
+            "KernelCommandLine": {
+                "ImaPolicy": ["tcb"],
+                "ExtraCommandLine": "my_first_param=foo my_second_param=\"bar baz\""
             },
             "Hostname": "cbl-mariner"
         }

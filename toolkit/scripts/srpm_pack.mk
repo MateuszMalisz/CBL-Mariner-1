@@ -42,19 +42,23 @@ $(STATUS_FLAGS_DIR)/build_srpms.flag: $(local_specs) $(local_spec_dirs) $(SPECS_
 	for spec in $(local_specs); do \
 		spec_file=$${spec} && \
 		srpm_file=$$(rpmspec -q $${spec_file} --srpm --define='with_check 1' --define='dist $(DIST_TAG)' --queryformat %{NAME}-%{VERSION}-%{RELEASE}.src.rpm) && \
-		wget $(SRPM_URL)/$${srpm_file} \
-			-O $(BUILD_SRPMS_DIR)/$${srpm_file} \
-            --no-verbose \
-            $(if $(TLS_CERT),--certificate=$(TLS_CERT)) \
-            $(if $(TLS_KEY),--private-key=$(TLS_KEY)) \
-            && \
-		touch $(BUILD_SRPMS_DIR)/$${srpm_file}  || \
-			$(call print_error,Failed to download $${srpm_file}) ; \
+		for url in $(SRPM_URL_LIST); do \
+			wget $${url}/$${srpm_file} \
+				-O $(BUILD_SRPMS_DIR)/$${srpm_file} \
+				--no-verbose \
+				$(if $(TLS_CERT),--certificate=$(TLS_CERT)) \
+				$(if $(TLS_KEY),--private-key=$(TLS_KEY)) \
+				&& \
+			touch $(BUILD_SRPMS_DIR)/$${srpm_file} && \
+			break; \
+		done || $(call print_error,Loop in $@ failed) ; \
+		{ [ -f $(BUILD_SRPMS_DIR)/$${srpm_file} ] || \
+			$(call print_error,Failed to download $${srpm_file});  } \
 	done || $(call print_error,Loop in $@ failed) ; \
 	touch $@
 else
 $(STATUS_FLAGS_DIR)/build_srpms.flag: $(local_specs) $(local_spec_dirs) $(local_sources) $(SPECS_DIR) $(go-srpmpacker)
-	$(go-srpmpacker) \
+	GODEBUG=x509ignoreCN=0 $(go-srpmpacker) \
 		--dir=$(SPECS_DIR) \
 		--output-dir=$(BUILD_SRPMS_DIR) \
 		--source-url=$(SOURCE_URL) \

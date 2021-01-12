@@ -110,7 +110,7 @@ func buildSystemConfig(systemConfig configuration.SystemConfig, disks []configur
 		return
 	}
 
-	isRootFS = (len(systemConfig.PartitionSettings) == 0)
+	isRootFS = len(systemConfig.PartitionSettings) == 0
 	if isRootFS {
 		logger.Log.Infof("Creating rootfs")
 		additionalExtraMountPoints, additionalExtraDirectories, err := setupRootFS(outputDir, installRoot)
@@ -188,7 +188,7 @@ func buildSystemConfig(systemConfig configuration.SystemConfig, disks []configur
 			return
 		}
 
-		err = cleanupExtraFilesInChroot(setupChroot, systemConfig)
+		err = cleanupExtraFilesInChroot(setupChroot)
 		if err != nil {
 			logger.Log.Error("Failed to cleanup extra files in setup chroot")
 			return
@@ -403,15 +403,25 @@ func fixupExtraFilesIntoChroot(installChroot *safechroot.Chroot, config *configu
 	return
 }
 
-func cleanupExtraFilesInChroot(installChroot *safechroot.Chroot, config configuration.SystemConfig) (err error) {
+func cleanupExtraFiles() (err error) {
 	dirsToRemove := []string{additionalFilesTempDirectory, postInstallScriptTempDirectory, sshPubKeysTempDirectory}
+
 	for _, dir := range dirsToRemove {
+		logger.Log.Infof("Cleaning up directory %s", dir)
 		err = os.RemoveAll(dir)
 		if err != nil {
-			logger.Log.Errorf("Failed to cleanup directory (%s). Error: %s", dir, err)
+			logger.Log.Warnf("Failed to cleanup directory (%s). Error: %s", dir, err)
 			return
 		}
 	}
+	return
+}
+
+func cleanupExtraFilesInChroot(chroot *safechroot.Chroot) (err error) {
+	logger.Log.Infof("Proceeding to cleanup extra files in chroot %s.", chroot.RootDir())
+	err = chroot.Run(func() error {
+		return cleanupExtraFiles()
+	})
 	return
 }
 
@@ -503,7 +513,7 @@ func configureDiskBootloader(systemConfig configuration.SystemConfig, installChr
 		rootDevice = fmt.Sprintf("PARTUUID=%v", partUUID)
 	}
 
-	err = installutils.InstallGrubCfg(installChroot.RootDir(), rootDevice, bootUUID, encryptedRoot)
+	err = installutils.InstallGrubCfg(installChroot.RootDir(), rootDevice, bootUUID, encryptedRoot, systemConfig.KernelCommandLine)
 	if err != nil {
 		err = fmt.Errorf("failed to install main grub config file: %s", err)
 		return

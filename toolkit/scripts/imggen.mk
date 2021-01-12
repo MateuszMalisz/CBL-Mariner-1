@@ -11,7 +11,11 @@ assets_files             = $(shell find $(assets_dir))
 imggen_local_repo        = $(MANIFESTS_DIR)/image/local.repo
 imagefetcher_local_repo  = $(MANIFESTS_DIR)/package/local.repo
 imagefetcher_cloned_repo = $(MANIFESTS_DIR)/package/fetcher.repo
+ifeq ($(build_arch),aarch64)
+initrd_config_json       = $(RESOURCES_DIR)/imageconfigs/iso_initrd_arm64.json
+else
 initrd_config_json       = $(RESOURCES_DIR)/imageconfigs/iso_initrd.json
+endif
 meta_user_data_files     = $(META_USER_DATA_DIR)/user-data $(META_USER_DATA_DIR)/meta-data
 ova_ovfinfo              = $(assets_dir)/ova/ovfinfo.txt
 ova_vmxtemplate          = $(assets_dir)/ova/vmx-template
@@ -35,7 +39,11 @@ image_external_package_cache_summary = $(imggen_config_dir)/image_external_deps.
 artifact_dir             = $(IMAGES_DIR)/$(config_name)
 imager_disk_output_dir   = $(imggen_config_dir)/imager_output
 imager_disk_output_files = $(shell find $(imager_disk_output_dir) -not -name '*:*')
+ifeq ($(build_arch),aarch64)
+initrd_img               = $(IMAGES_DIR)/iso_initrd_arm64/iso-initrd.img
+else
 initrd_img               = $(IMAGES_DIR)/iso_initrd/iso-initrd.img
+endif
 meta_user_data_iso       = ${IMAGES_DIR)/meta-user-data.iso
 
 $(call create_folder,$(workspace_dir))
@@ -68,17 +76,19 @@ $(STATUS_FLAGS_DIR)/validate-image-config%.flag: $(go-imageconfigvalidator) $(de
 	touch $@
 
 
+imagepkgfetcher_extra_flags :=
 ifeq ($(DISABLE_UPSTREAM_REPOS),y)
-imagepkgfetcher_disable_upstream_repos_flag := --disable-upstream-repos
-else
-imagepkgfetcher_disable_upstream_repos_flag :=
+imagepkgfetcher_extra_flags += --disable-upstream-repos
 endif
 
 ifeq ($(USE_UPDATE_REPO),y)
-imagepkgfetcher_update_repo_flag := --use-update-repo
-else
-imagepkgfetcher_update_repo_flag :=
+imagepkgfetcher_extra_flags += --use-update-repo
 endif
+
+ifeq ($(USE_PREVIEW_REPO),y)
+imagepkgfetcher_extra_flags += --use-preview-repo
+endif
+
 $(image_package_cache_summary): $(go-imagepkgfetcher) $(chroot_worker) $(imggen_local_repo) $(depend_REPO_LIST) $(REPO_LIST) $(depend_CONFIG_FILE) $(CONFIG_FILE) $(validate-config) $(packagelist_files) $(RPMS_DIR) $(imggen_rpms)
 	$(if $(CONFIG_FILE),,$(error Must set CONFIG_FILE=))
 	$(go-imagepkgfetcher) \
@@ -92,8 +102,7 @@ $(image_package_cache_summary): $(go-imagepkgfetcher) $(chroot_worker) $(imggen_
 		--tls-cert=$(TLS_CERT) \
 		--tls-key=$(TLS_KEY) \
 		$(foreach repo, $(imagefetcher_local_repo) $(imagefetcher_cloned_repo) $(REPO_LIST),--repo-file="$(repo)" ) \
-		$(imagepkgfetcher_update_repo_flag) \
-		$(imagepkgfetcher_disable_upstream_repos_flag) \
+		$(imagepkgfetcher_extra_flags) \
 		--input-summary-file=$(IMAGE_CACHE_SUMMARY) \
 		--output-summary-file=$@ \
 		--output-dir=$(local_and_external_rpm_cache)
@@ -151,8 +160,7 @@ $(image_external_package_cache_summary): $(cached_file) $(go-imagepkgfetcher) $(
 		--tls-cert=$(TLS_CERT) \
 		--tls-key=$(TLS_KEY) \
 		$(foreach repo, $(imagefetcher_local_repo) $(imagefetcher_cloned_repo) $(REPO_LIST),--repo-file="$(repo)" ) \
-		$(imagepkgfetcher_update_repo_flag) \
-		$(imagepkgfetcher_disable_upstream_repos_flag) \
+		$(imagepkgfetcher_extra_flags) \
 		--input-summary-file=$(IMAGE_CACHE_SUMMARY) \
 		--output-summary-file=$@ \
 		--output-dir=$(external_rpm_cache)
@@ -176,6 +184,7 @@ iso: $(go-isomaker) $(go-liveinstaller) $(go-imager) $(depend_CONFIG_FILE) $(CON
 		--resources $(RESOURCES_DIR) \
 		--iso-repo $(local_and_external_rpm_cache) \
 		--log-level $(LOG_LEVEL) \
+		--log-file $(LOGS_DIR)/imggen/isomaker.log \
 		$(if $(UNATTENDED_INSTALLER),--unattended-install) \
 		--output-dir $(artifact_dir) \
 		--image-tag=$(IMAGE_TAG)

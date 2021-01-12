@@ -244,7 +244,13 @@ func CreatePartitions(diskDevPath string, disk configuration.Disk, rootEncryptio
 
 	// Create new partition table
 	partitionTableType := disk.PartitionTableType
-	_, stderr, err = shell.Execute("parted", diskDevPath, "--script", "mklabel", partitionTableType)
+	logger.Log.Debugf("Converting partition table type (%v) to parted argument", partitionTableType)
+	partedArgument, err := partitionTableType.ConvertToPartedArgument()
+	if err != nil {
+		logger.Log.Errorf("Unable to convert partition table type (%v) to parted argument", partitionTableType)
+		return
+	}
+	_, stderr, err = shell.Execute("parted", diskDevPath, "--script", "mklabel", partedArgument)
 	if err != nil {
 		logger.Log.Warnf("Failed to set partition table type using parted: %v", stderr)
 		return
@@ -253,7 +259,7 @@ func CreatePartitions(diskDevPath string, disk configuration.Disk, rootEncryptio
 	// Partitions assumed to be defined in sorted order
 	for idx, partition := range disk.Partitions {
 		partitionNumber := idx + 1
-		partDevPath, err := CreateSinglePartition(diskDevPath, partitionNumber, partitionTableType, partition)
+		partDevPath, err := CreateSinglePartition(diskDevPath, partitionNumber, partitionTableType.String(), partition)
 		if err != nil {
 			logger.Log.Warnf("Failed to create single partition")
 			return partDevPathMap, partIDToFsTypeMap, encryptedRoot, err
@@ -393,9 +399,17 @@ func FormatSinglePartition(partDevPath string, partition configuration.Partition
 
 // SystemBlockDevices returns all block devices on the host system.
 func SystemBlockDevices() (systemDevices []SystemBlockDevice, err error) {
+	const (
+		scsiDiskMajorNumber      = "8"
+		mmcBlockMajorNumber      = "179"
+		virtualDiskMajorNumber   = "252,253,254"
+		blockExtendedMajorNumber = "259"
+	)
 	var blockDevices blockDevicesOutput
 
-	rawDiskOutput, stderr, err := shell.Execute("lsblk", "-d", "--bytes", "-I", "8,179,259", "-n", "--json", "--output", "NAME,SIZE,MODEL")
+	blockDeviceMajorNumbers := []string{scsiDiskMajorNumber, mmcBlockMajorNumber, virtualDiskMajorNumber, blockExtendedMajorNumber}
+	includeFilter := strings.Join(blockDeviceMajorNumbers, ",")
+	rawDiskOutput, stderr, err := shell.Execute("lsblk", "-d", "--bytes", "-I", includeFilter, "-n", "--json", "--output", "NAME,SIZE,MODEL")
 	if err != nil {
 		logger.Log.Warn(stderr)
 		return
